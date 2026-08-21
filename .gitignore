@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Compiled object files
+*.o
+
+# Executables (common names in this project)
+ejercicios
+ejercicio-tap
+ejercicios-strings
+hello-word
+i++vs++i
+max_subarray_sum_tests
+
+# Generic executable patterns (no extension, compiled binaries)
+*.out
+a.out

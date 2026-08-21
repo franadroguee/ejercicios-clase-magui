@@ -12,20 +12,32 @@ Tutorial 3 – Listas enlazadas e iteradores
   - [Insertar al inicio](#insertar-al-inicio)
   - [Insertar al final](#insertar-al-final)
   - [Buscar un elemento](#buscar-un-elemento)
+  - [Eliminar por valor](#eliminar-por-valor)
   - [Recorrer la lista](#recorrer-la-lista)
   - [Tamaño de la lista](#tamaño-de-la-lista)
   - [Destructor: liberar todos los nodos](#destructor-liberar-todos-los-nodos)
   - [Repaso de complejidades (lista simple)](#repaso-de-complejidades-lista-simple)
 - [Lista doblemente enlazada](#lista-doblemente-enlazada)
-  - [Implementación de la lista doble](#implementación-de-la-lista-doble)
+  - [Estructura del nodo doble](#estructura-del-nodo-doble)
+  - [Insertar al final (lista doble)](#insertar-al-final-lista-doble)
+  - [Eliminar al final (lista doble)](#eliminar-al-final-lista-doble)
   - [Repaso de complejidades (lista doble)](#repaso-de-complejidades-lista-doble)
 - [Lista circular](#lista-circular)
-  - [Implementación de la lista circular](#implementación-de-la-lista-circular)
+  - [Estructura de la lista circular](#estructura-de-la-lista-circular)
+  - [Insertar al final (lista circular)](#insertar-al-final-lista-circular)
+  - [Recorrer la lista circular](#recorrer-la-lista-circular)
   - [Repaso de complejidades (lista circular)](#repaso-de-complejidades-lista-circular)
 - [Iteradores](#iteradores)
   - [¿Qué es un iterador?](#qué-es-un-iterador)
   - [Implementando un iterador propio](#implementando-un-iterador-propio)
+  - [Cómo se traduce el for basado en rango](#cómo-se-traduce-el-for-basado-en-rango)
   - [¿Por qué desacoplar el recorrido de la estructura?](#por-qué-desacoplar-el-recorrido-de-la-estructura)
+- [Localidad espacial y cache](#localidad-espacial-y-cache)
+  - [¿Por qué importa la localidad espacial?](#por-qué-importa-la-localidad-espacial)
+  - [Vector vs lista enlazada: el impacto real](#vector-vs-lista-enlazada-el-impacto-real)
+- [Costo amortizado de std::vector](#costo-amortizado-de-stdvector)
+  - [¿Qué pasa cuando el vector se llena?](#qué-pasa-cuando-el-vector-se-llena)
+  - [Análisis amortizado](#análisis-amortizado)
 - [Comparación con arreglo y std::vector](#comparación-con-arreglo-y-stdvector)
 - [Resumen general de complejidades](#resumen-general-de-complejidades)
 
@@ -45,12 +57,11 @@ Tutorial 3 – Listas enlazadas e iteradores
 Una lista enlazada no es un bloque contiguo de memoria como un arreglo. Es una colección de **nodos** dispersos en el *heap*, donde cada nodo guarda un dato y **un puntero al siguiente nodo**.
 
 ```cpp
-template <typename T>
 struct Nodo {
-    T dato;
-    Nodo<T>* siguiente;
+    int dato;
+    Nodo* siguiente;
 
-    Nodo(const T& valor, Nodo<T>* sig = nullptr)
+    Nodo(int valor, Nodo* sig = nullptr)
         : dato(valor), siguiente(sig) {}
 };
 ```
@@ -68,20 +79,19 @@ Cada nodo se reserva individualmente con `new` y debe liberarse individualmente 
 ## Implementación de la lista simple
 
 ```cpp
-template <typename T>
 class ListaSimple {
 private:
-    Nodo<T>* primero;
-    Nodo<T>* ultimo;
+    Nodo* primero;
+    Nodo* ultimo;
     size_t largo;
 
 public:
     ListaSimple() : primero(nullptr), ultimo(nullptr), largo(0) {}
 
     ~ListaSimple() {
-        Nodo<T>* actual = primero;
+        Nodo* actual = primero;
         while (actual != nullptr) {
-            Nodo<T>* siguiente = actual->siguiente;
+            Nodo* siguiente = actual->siguiente;
             delete actual;
             actual = siguiente;
         }
@@ -90,21 +100,20 @@ public:
     size_t tamaño() const { return largo; }
     bool vacia() const { return largo == 0; }
 
-    void insertarAlInicio(const T& valor);
-    void insertarAlFinal(const T& valor);
-    bool buscar(const T& valor) const;
+    void insertarAlInicio(int valor);
+    void insertarAlFinal(int valor);
+    bool buscar(int valor) const;
     void imprimir() const;
 };
 ```
 
-> Guardamos un puntero `ultimo` y un contador `largo` por la misma razón que en C: sin ellos, insertar al final o pedir el tamaño serían operaciones O(n).
+> Guardamos un puntero `ultimo` y un contador `largo` para evitar que insertar al final o pedir el tamaño sean operaciones O(n). Es un *trade-off* clásico: usamos un poco más de memoria (dos punteros extra) para ganar tiempo.
 
 ## Insertar al inicio
 
 ```cpp
-template <typename T>
-void ListaSimple<T>::insertarAlInicio(const T& valor) {
-    Nodo<T>* nuevo = new Nodo<T>(valor, primero);
+void ListaSimple::insertarAlInicio(int valor) {
+    Nodo* nuevo = new Nodo(valor, primero);
     primero = nuevo;
     if (ultimo == nullptr) {   // la lista estaba vacía
         ultimo = nuevo;
@@ -116,9 +125,8 @@ void ListaSimple<T>::insertarAlInicio(const T& valor) {
 ## Insertar al final
 
 ```cpp
-template <typename T>
-void ListaSimple<T>::insertarAlFinal(const T& valor) {
-    Nodo<T>* nuevo = new Nodo<T>(valor, nullptr);
+void ListaSimple::insertarAlFinal(int valor) {
+    Nodo* nuevo = new Nodo(valor, nullptr);
     if (ultimo == nullptr) {   // la lista estaba vacía
         primero = nuevo;
     } else {
@@ -133,54 +141,60 @@ void ListaSimple<T>::insertarAlFinal(const T& valor) {
 
 ## Buscar un elemento
 
-```cpp
-template <typename T>
-bool ListaSimple<T>::buscar(const T& valor) const {
-    Nodo<T>* actual = primero;
-    while (actual != nullptr) {
-        if (actual->dato == valor) return true;
-        actual = actual->siguiente;
-    }
-    return false;
-}
+La idea es recorrer la lista desde el principio hasta encontrar el valor buscado o llegar al final:
+
 ```
+BUSCAR(valor):
+    actual ← primero
+    MIENTRAS actual ≠ nullptr:
+        SI actual.dato == valor:
+            RETORNAR verdadero
+        actual ← actual.siguiente
+    RETORNAR falso
+```
+
+> **Ejercicio:** implementá esta función en C++.
+
+## Eliminar por valor
 
 Para **borrar por valor** hay que recorrer con dos punteros (uno "anterior" y uno "actual"), porque en la lista simple no hay forma de ir hacia atrás una vez que encontramos el nodo:
 
-```cpp
-template <typename T>
-bool ListaSimple<T>::eliminar(const T& valor) {
-    Nodo<T>* anterior = nullptr;
-    Nodo<T>* actual = primero;
-
-    while (actual != nullptr && actual->dato != valor) {
-        anterior = actual;
-        actual = actual->siguiente;
-    }
-
-    if (actual == nullptr) return false;  // no estaba
-
-    if (anterior == nullptr) {
-        primero = actual->siguiente;      // borramos el primero
-    } else {
-        anterior->siguiente = actual->siguiente;
-    }
-    if (actual == ultimo) {
-        ultimo = anterior;                // borramos el último
-    }
-
-    delete actual;
-    largo--;
-    return true;
-}
 ```
+ELIMINAR(valor):
+    anterior ← nullptr
+    actual ← primero
+
+    // Buscar el nodo con el valor
+    MIENTRAS actual ≠ nullptr Y actual.dato ≠ valor:
+        anterior ← actual
+        actual ← actual.siguiente
+
+    SI actual == nullptr:
+        RETORNAR falso  // no estaba
+
+    // Desenlazar el nodo encontrado
+    SI anterior == nullptr:
+        primero ← actual.siguiente  // era el primero
+    SINO:
+        anterior.siguiente ← actual.siguiente
+
+    SI actual == ultimo:
+        ultimo ← anterior  // era el último
+
+    LIBERAR actual
+    largo ← largo - 1
+    RETORNAR verdadero
+```
+
+> **Pregunta para pensar:** ¿por qué necesitamos el puntero `anterior`? ¿Qué pasa si solo tenemos `actual`?
+
+> **Ejercicio:** implementá esta función en C++. Prestá atención a los casos borde: eliminar el primero, eliminar el último, eliminar de una lista con un solo elemento.
 
 ## Recorrer la lista
 
 ```cpp
-template <typename T>
-void ListaSimple<T>::imprimir() const {
-    Nodo<T>* actual = primero;
+void ListaSimple::imprimir() const {
+    Nodo* actual = primero;
     while (actual != nullptr) {
         std::cout << actual->dato << " ";
         actual = actual->siguiente;
@@ -201,9 +215,9 @@ Este es uno de los errores más comunes en C++: si el destructor de la lista no 
 
 ```cpp
 ~ListaSimple() {
-    Nodo<T>* actual = primero;
+    Nodo* actual = primero;
     while (actual != nullptr) {
-        Nodo<T>* siguiente = actual->siguiente;  // lo guardamos ANTES de liberar
+        Nodo* siguiente = actual->siguiente;  // lo guardamos ANTES de liberar
         delete actual;
         actual = siguiente;
     }
@@ -212,7 +226,7 @@ Este es uno de los errores más comunes en C++: si el destructor de la lista no 
 
 > **¿Por qué guardamos `siguiente` antes de hacer `delete actual`?** Porque una vez que liberamos la memoria de `actual`, leer `actual->siguiente` es acceso a memoria inválida (comportamiento indefinido). Guardar el puntero antes es obligatorio.
 
-> **Pregunta para pensar:** si el destructor de `ListaSimple<T>` no libera los nodos, ¿el programa se cae inmediatamente? ¿Cómo se detecta este tipo de error en la práctica? (Pensar en herramientas como `valgrind` o *sanitizers*.)
+> **Pregunta para pensar:** si el destructor de `ListaSimple` no libera los nodos, ¿el programa se cae inmediatamente? ¿Cómo se detecta este tipo de error en la práctica? (Pensar en herramientas como `valgrind` o *sanitizers*.)
 
 ## Repaso de complejidades (lista simple)
 
@@ -236,64 +250,65 @@ Este es uno de los errores más comunes en C++: si el destructor de la lista no 
 
 **Invariante:** cada nodo conoce al siguiente **y al anterior**.
 
-## Implementación de la lista doble
+## Estructura del nodo doble
+
+La diferencia con el nodo simple es que ahora cada nodo tiene **dos punteros**: uno al siguiente y otro al anterior.
 
 ```cpp
-template <typename T>
 struct NodoDoble {
-    T dato;
-    NodoDoble<T>* siguiente;
-    NodoDoble<T>* anterior;
-
-    NodoDoble(const T& valor)
-        : dato(valor), siguiente(nullptr), anterior(nullptr) {}
-};
-
-template <typename T>
-class ListaDoble {
-private:
-    NodoDoble<T>* primero;
-    NodoDoble<T>* ultimo;
-    size_t largo;
-
-public:
-    ListaDoble() : primero(nullptr), ultimo(nullptr), largo(0) {}
-
-    ~ListaDoble() {
-        NodoDoble<T>* actual = primero;
-        while (actual != nullptr) {
-            NodoDoble<T>* siguiente = actual->siguiente;
-            delete actual;
-            actual = siguiente;
-        }
-    }
-
-    void insertarAlFinal(const T& valor) {
-        NodoDoble<T>* nuevo = new NodoDoble<T>(valor);
-        if (ultimo == nullptr) {
-            primero = ultimo = nuevo;
-        } else {
-            nuevo->anterior = ultimo;
-            ultimo->siguiente = nuevo;
-            ultimo = nuevo;
-        }
-        largo++;
-    }
-
-    void eliminarAlFinal() {
-        if (ultimo == nullptr) return;  // lista vacía
-        NodoDoble<T>* viejo = ultimo;
-        ultimo = ultimo->anterior;
-        if (ultimo != nullptr) {
-            ultimo->siguiente = nullptr;
-        } else {
-            primero = nullptr;          // quedó vacía
-        }
-        delete viejo;
-        largo--;
-    }
+    int dato;
+    NodoDoble* siguiente;
+    NodoDoble* anterior;
 };
 ```
+
+La clase `ListaDoble` tiene la misma estructura que `ListaSimple`: punteros a `primero`, `ultimo` y un contador `largo`.
+
+## Insertar al final (lista doble)
+
+```
+INSERTAR_AL_FINAL(valor):
+    nuevo ← crear NodoDoble(valor)
+
+    SI ultimo == nullptr:
+        // Lista vacía: el nuevo es primero y último
+        primero ← nuevo
+        ultimo ← nuevo
+    SINO:
+        // Enlazar en ambas direcciones
+        nuevo.anterior ← ultimo
+        ultimo.siguiente ← nuevo
+        ultimo ← nuevo
+
+    largo ← largo + 1
+```
+
+> **Ejercicio:** implementá esta función en C++. Comparala con `insertarAlFinal` de la lista simple.
+
+## Eliminar al final (lista doble)
+
+Esta es la operación que justifica tener el puntero `anterior`: en la lista simple era O(n), acá es O(1).
+
+```
+ELIMINAR_AL_FINAL():
+    SI ultimo == nullptr:
+        RETORNAR  // lista vacía
+
+    viejo ← ultimo
+    ultimo ← ultimo.anterior
+
+    SI ultimo ≠ nullptr:
+        ultimo.siguiente ← nullptr
+    SINO:
+        primero ← nullptr  // quedó vacía
+
+    LIBERAR viejo
+    largo ← largo - 1
+```
+
+> **Pregunta para pensar:** ¿por qué no necesitamos recorrer toda la lista para encontrar el anteúltimo, como en la lista simple?
+
+> **Ejercicio:** implementá esta función en C++.
 
 > El costo de tener el puntero `anterior` es memoria extra por nodo (un puntero más), pero a cambio ganamos poder recorrer en ambas direcciones y hacer `eliminarAlFinal` en O(1).
 
@@ -315,45 +330,61 @@ public:
 
 **Invariante:** el último nodo, en lugar de apuntar a `nullptr`, apunta al primero. No tiene un "fin" natural.
 
-## Implementación de la lista circular
+## Estructura de la lista circular
+
+La lista circular usa los mismos nodos que la lista simple, pero con una diferencia clave: **el último nodo apunta al primero** en vez de a `nullptr`.
+
+Un truco útil: guardamos el puntero a `ultimo` (no a `primero`). Como `ultimo->siguiente` nos da el primero, podemos acceder a ambos extremos en O(1).
 
 ```cpp
-template <typename T>
 class ListaCircular {
 private:
-    Nodo<T>* ultimo;   // guardamos el ÚLTIMO; ultimo->siguiente es el primero
+    Nodo* ultimo;   // ultimo->siguiente es el primero
     size_t largo;
-
-public:
-    ListaCircular() : ultimo(nullptr), largo(0) {}
-
-    void insertarAlFinal(const T& valor) {
-        Nodo<T>* nuevo = new Nodo<T>(valor, nullptr);
-        if (ultimo == nullptr) {
-            nuevo->siguiente = nuevo;   // se apunta a sí mismo
-            ultimo = nuevo;
-        } else {
-            nuevo->siguiente = ultimo->siguiente;  // apunta al viejo primero
-            ultimo->siguiente = nuevo;
-            ultimo = nuevo;
-        }
-        largo++;
-    }
-
-    void imprimir() const {
-        if (ultimo == nullptr) return;
-        Nodo<T>* primero = ultimo->siguiente;
-        Nodo<T>* actual = primero;
-        do {
-            std::cout << actual->dato << " ";
-            actual = actual->siguiente;
-        } while (actual != primero);   // ¡corta al volver al inicio!
-        std::cout << std::endl;
-    }
 };
 ```
 
-> **Nota:** si guardamos el puntero a `ultimo` (en vez de a `primero`), tanto `insertarAlInicio` como `insertarAlFinal` quedan en O(1), porque `ultimo->siguiente` nos da el primero directamente.
+## Insertar al final (lista circular)
+
+```
+INSERTAR_AL_FINAL(valor):
+    nuevo ← crear Nodo(valor)
+
+    SI ultimo == nullptr:
+        // Lista vacía: el nuevo se apunta a sí mismo
+        nuevo.siguiente ← nuevo
+        ultimo ← nuevo
+    SINO:
+        // El nuevo apunta al viejo primero
+        nuevo.siguiente ← ultimo.siguiente
+        // El viejo último apunta al nuevo
+        ultimo.siguiente ← nuevo
+        // Actualizamos quién es el último
+        ultimo ← nuevo
+
+    largo ← largo + 1
+```
+
+> **Ejercicio:** implementá esta función en C++.
+
+## Recorrer la lista circular
+
+La condición de corte no puede ser `actual != nullptr` (¡nunca hay un nullptr!). Hay que detectar cuándo volvemos al punto de partida:
+
+```
+IMPRIMIR():
+    SI ultimo == nullptr:
+        RETORNAR  // lista vacía
+
+    primero ← ultimo.siguiente
+    actual ← primero
+    HACER:
+        IMPRIMIR actual.dato
+        actual ← actual.siguiente
+    MIENTRAS actual ≠ primero  // ¡corta al volver al inicio!
+```
+
+> **Ejercicio:** implementá esta función en C++. Usá un `do-while` para asegurarte de recorrer al menos una vez antes de comparar.
 
 > **Pregunta para pensar:** ¿qué pasa si al recorrer una lista circular usás la condición de corte `actual != nullptr` en vez de `actual != primero`? ¿Por qué es un error tan común?
 
@@ -375,7 +406,7 @@ public:
 
 ## ¿Qué es un iterador?
 
-Hasta ahora, para recorrer cualquiera de nuestras listas tuvimos que exponer el detalle interno: un puntero `Nodo<T>*` que el código externo mueve con `actual = actual->siguiente`. Esto tiene un problema: **quien recorre la lista necesita conocer su representación interna**.
+Hasta ahora, para recorrer cualquiera de nuestras listas tuvimos que exponer el detalle interno: un puntero `Nodo*` que el código externo mueve con `actual = actual->siguiente`. Esto tiene un problema: **quien recorre la lista necesita conocer su representación interna**.
 
 Un **iterador** es un objeto que abstrae "la posición actual dentro de un recorrido", ofreciendo una interfaz uniforme sin importar cómo está implementada la estructura por dentro:
 
@@ -389,43 +420,99 @@ Es la misma idea detrás de un `for` de C++ con rango (`for (auto& x : contenedo
 
 ## Implementando un iterador propio
 
-Agregamos una clase anidada `Iterador` a `ListaSimple<T>` y los métodos `begin()` / `end()` para habilitar el `for` basado en rango:
+Para que una clase soporte el `for` basado en rango de C++, necesitamos:
+
+1. **Una clase `Iterador`** (o `iterator`) que representa "la posición actual" dentro del recorrido
+2. **Métodos `begin()` y `end()`** en la clase contenedora que devuelvan iteradores
+
+### Métodos que debe tener la clase Iterador
+
+El iterador debe definir **tres operadores** para que el `for` funcione:
+
+| Operador | Firma | ¿Para qué se usa? |
+|----------|-------|-------------------|
+| `operator*` | `int& operator*()` | **Desreferenciar**: obtener el elemento en la posición actual. Es lo que te da el valor cuando escribís `*it` o cuando el `for` asigna `x` en `for (int x : lista)`. |
+| `operator++` | `Iterador& operator++()` | **Avanzar**: pasar a la siguiente posición. El `for` lo llama automáticamente al final de cada iteración. Devuelve una referencia al iterador mismo para permitir encadenar operaciones. |
+| `operator!=` | `bool operator!=(const Iterador& otro)` | **Comparar**: saber si dos posiciones son distintas. El `for` lo usa para comparar contra `end()` y saber cuándo terminar. |
+
+### Métodos que debe tener la clase contenedora
+
+| Método | Firma | ¿Qué devuelve? |
+|--------|-------|----------------|
+| `begin()` | `Iterador begin() const` | Un iterador apuntando al **primer elemento**. En nuestra lista, sería `Iterador(primero)`. |
+| `end()` | `Iterador end() const` | Un iterador representando "después del último elemento". En nuestra lista, sería `Iterador(nullptr)`. **No apunta a un elemento válido**; solo sirve para comparar. |
+
+### Estructura del iterador
+
+El iterador es una clase anidada dentro de `ListaSimple` que guarda un puntero al nodo actual:
 
 ```cpp
-template <typename T>
-class ListaSimple {
-    // ... (declaración de Nodo, primero, ultimo, largo, como antes)
+class Iterador {
+private:
+    Nodo* actual;
+
 public:
-    class Iterador {
-    private:
-        Nodo<T>* actual;
+    Iterador(Nodo* nodo) : actual(nodo) {}
 
-    public:
-        Iterador(Nodo<T>* nodo) : actual(nodo) {}
-
-        T& operator*() const {
-            return actual->dato;
-        }
-
-        Iterador& operator++() {
-            actual = actual->siguiente;
-            return *this;
-        }
-
-        bool operator!=(const Iterador& otro) const {
-            return actual != otro.actual;
-        }
-    };
-
-    Iterador begin() const { return Iterador(primero); }
-    Iterador end() const { return Iterador(nullptr); }
+    // Los tres operadores van acá...
 };
 ```
 
-Con esto, recorrer la lista se ve exactamente igual que recorrer un `std::vector`:
+Los tres operadores que hay que implementar:
+
+```
+operator*():
+    RETORNAR actual.dato
+
+operator++():
+    actual ← actual.siguiente
+    RETORNAR este iterador
+
+operator!=(otro):
+    RETORNAR actual ≠ otro.actual
+```
+
+Y en la clase `ListaSimple`:
+
+```
+begin():
+    RETORNAR Iterador(primero)
+
+end():
+    RETORNAR Iterador(nullptr)
+```
+
+> **Ejercicio:** implementá el iterador completo en C++ y verificá que funcione con `for (int x : lista)`.
+
+### Cómo se traduce el for basado en rango
+
+Cuando escribís:
 
 ```cpp
-ListaSimple<int> lista;
+for (int x : lista) {
+    std::cout << x << " ";
+}
+```
+
+El compilador lo traduce automáticamente a:
+
+```cpp
+for (auto it = lista.begin(); it != lista.end(); ++it) {
+    int x = *it;
+    std::cout << x << " ";
+}
+```
+
+Fijate cómo se usan los tres operadores del iterador:
+- `lista.begin()` → crea el iterador en la posición inicial
+- `it != lista.end()` → usa `operator!=` para saber si terminó
+- `*it` → usa `operator*` para obtener el elemento actual
+- `++it` → usa `operator++` para avanzar al siguiente
+
+Con esto, recorrer nuestra lista se ve exactamente igual que recorrer un `std::vector`:
+
+```cpp
+ListaSimple lista;
 lista.insertarAlFinal(1);
 lista.insertarAlFinal(2);
 lista.insertarAlFinal(3);
@@ -433,13 +520,10 @@ lista.insertarAlFinal(3);
 for (int x : lista) {
     std::cout << x << " ";
 }
-// también funciona "a mano":
-for (auto it = lista.begin(); it != lista.end(); ++it) {
-    std::cout << *it << " ";
-}
+// Salida: 1 2 3
 ```
 
-> El compilador traduce `for (int x : lista)` exactamente al segundo `for`. El `for` basado en rango **no es magia**: solo requiere que la clase tenga `begin()` y `end()`, y que el tipo devuelto soporte `*`, `++` y `!=`.
+> El `for` basado en rango **no es magia**: solo requiere que la clase tenga `begin()` y `end()`, y que el tipo devuelto (el iterador) soporte `*`, `++` y `!=`.
 
 ## ¿Por qué desacoplar el recorrido de la estructura?
 
@@ -450,6 +534,141 @@ El iterador es una capa de abstracción entre **quien recorre** y **cómo está 
 - Permite escribir algoritmos genéricos (buscar, sumar, ordenar) que funcionan sobre **cualquier** contenedor que exponga iteradores — es exactamente lo que hace la STL con `std::find`, `std::sort`, `std::accumulate`, etc.
 
 > **Pregunta para pensar:** ¿por qué `std::sort` funciona sobre `std::vector` pero no compila sobre un iterador de `std::list` (o de nuestra `ListaSimple`)? Pensarlo en términos de qué operaciones necesita `sort` (acceso aleatorio) contra las que ofrece un iterador de lista enlazada (solo avanzar de a uno).
+
+
+
+# Localidad espacial y cache
+
+## ¿Por qué importa la localidad espacial?
+
+Cuando el procesador necesita un dato que no está en cache, tiene que traerlo desde la RAM. Este proceso (un *cache miss*) es lento: la RAM es **50-200 veces más lenta** que la cache L1.
+
+Pero el procesador no trae solo el byte que necesita: trae un **bloque completo** de memoria contigua (típicamente 64 bytes), llamado *línea de cache*. La idea es que si accedés a un dato, probablemente pronto vas a acceder a los datos vecinos.
+
+```
+Memoria:  [ A ][ B ][ C ][ D ][ E ][ F ][ G ][ H ]
+                     ↑
+                 Pedís C
+
+Cache:    [ B ][ C ][ D ][ E ]   ← el procesador trae todo el bloque
+```
+
+**Localidad espacial** significa que los datos que se usan juntos están guardados en posiciones de memoria cercanas. Si tu estructura tiene buena localidad espacial, un solo cache miss te trae muchos datos útiles.
+
+## Vector vs lista enlazada: el impacto real
+
+Un `std::vector` guarda todos sus elementos en un bloque contiguo de memoria:
+
+```
+vector<int>:  [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ]  ← todos juntos en memoria
+```
+
+Al recorrer el vector, el procesador trae varios elementos por cada acceso a RAM. En un vector de enteros de 4 bytes, una línea de cache de 64 bytes te trae **16 elementos** de una vez.
+
+Una lista enlazada tiene cada nodo en una posición distinta del heap:
+
+```
+Lista enlazada:  [dato|→]    [dato|→]    [dato|→]    [dato|→]
+                   ↑           ↑           ↑           ↑
+                 0x100       0x3F00      0x8200      0x1A00
+                 (posiciones dispersas en memoria)
+```
+
+Al recorrer la lista, cada nodo puede causar un cache miss porque están dispersos. El procesador trae un bloque de 64 bytes, pero solo usás 8-16 bytes (el dato + el puntero) antes de saltar a otra posición completamente distinta.
+
+**Resultado práctico:** aunque recorrer una lista y recorrer un vector son ambos O(n), el vector puede ser **10-50 veces más rápido** en la práctica por aprovechar la cache.
+
+> **Pregunta para pensar:** si la lista enlazada tiene esta desventaja tan grande, ¿por qué sigue siendo útil? ¿En qué casos la usarías igual?
+
+
+
+# Costo amortizado de std::vector
+
+## ¿Qué pasa cuando el vector se llena?
+
+Un `std::vector` guarda sus elementos en un arreglo dinámico con cierta **capacidad** reservada. Cuando se llena e intentás agregar un elemento más, tiene que:
+
+1. Reservar un arreglo nuevo más grande (típicamente el doble de capacidad)
+2. Copiar todos los elementos al arreglo nuevo
+3. Liberar el arreglo viejo
+4. Agregar el nuevo elemento
+
+Esto es claramente **O(n)** cuando ocurre. Pero la clave está en que no ocurre en cada inserción.
+
+## Una analogía: la alcancía
+
+Imaginate que tenés una alcancía y cada día metés $1. Pero cada vez que la alcancía se llena, tenés que:
+1. Comprar una alcancía el doble de grande
+2. Pasar todas las monedas a la nueva
+3. Romper la vieja
+
+Pasar las monedas es "trabajo extra". La pregunta es: **¿cuánto trabajo hacés en promedio por cada moneda que guardás?**
+
+## El ejemplo concreto
+
+Supongamos que el vector empieza con capacidad 1:
+
+```
+Inserción 1:  [1]               → capacidad 1, solo inserto (costo: 1)
+Inserción 2:  [1,2]             → ¡lleno! creo array de 2, copio 1, inserto (costo: 1+1 = 2)
+Inserción 3:  [1,2,3,_]         → ¡lleno! creo array de 4, copio 2, inserto (costo: 2+1 = 3)
+Inserción 4:  [1,2,3,4]         → hay lugar, solo inserto (costo: 1)
+Inserción 5:  [1,2,3,4,5,_,_,_] → ¡lleno! creo array de 8, copio 4, inserto (costo: 4+1 = 5)
+Inserción 6:  hay lugar, solo inserto (costo: 1)
+Inserción 7:  hay lugar, solo inserto (costo: 1)
+Inserción 8:  hay lugar, solo inserto (costo: 1)
+```
+
+## Sumemos los costos
+
+Para insertar 8 elementos gastamos:
+- Inserciones simples: 1+1+1+1+1+1+1+1 = **8**
+- Copias: 1+2+4 = **7**
+- **Total: 15**
+
+Costo promedio por inserción: 15/8 ≈ **1.9**
+
+## El patrón general
+
+Las copias "caras" ocurren cada vez menos seguido:
+- Copio 1 elemento en la inserción 2
+- Copio 2 elementos en la inserción 3
+- Copio 4 elementos en la inserción 5
+- Copio 8 elementos en la inserción 9
+- ...
+
+La suma 1+2+4+8+...+n/2 = **n-1** (es una serie geométrica).
+
+Entonces para n inserciones:
+- Costo de insertar: n
+- Costo de copiar: ~n
+- **Total: ~2n**
+
+Dividido por n inserciones = **2 operaciones en promedio** = **O(1) amortizado**
+
+## ¿Por qué "amortizado"?
+
+Porque las inserciones "caras" se "pagan" con las baratas. Es como si cada inserción barata guardara un poco de crédito para cuando toque una cara.
+
+> **Importante:** "O(1) amortizado" **no significa que cada operación sea O(1)**. La inserción 5 costó 5 operaciones, no 1. Pero si hacés muchas inserciones, el promedio es O(1).
+
+## ¿Y si agrandamos de a 1 en vez de duplicar?
+
+Ahí sí sería O(n) por inserción:
+
+```
+Inserción 1: copio 0
+Inserción 2: copio 1
+Inserción 3: copio 2
+...
+Inserción n: copio n-1
+```
+
+Total de copias: 0+1+2+...+(n-1) = n(n-1)/2 = **O(n²)**
+
+Dividido por n inserciones = **O(n) por inserción** → ¡mucho peor!
+
+Por eso **duplicar la capacidad es clave** para que sea O(1) amortizado.
 
 
 
